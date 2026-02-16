@@ -1,6 +1,3 @@
-vcpkg_check_linkage(ONLY_DYNAMIC_LIBRARY)
-
-
 
 # Clang
 #
@@ -71,19 +68,21 @@ endif()
 # MDL-SDK
 #
 # Note about "supports:" in vcpkg.json:
-# !x86, !(windows & (staticcrt | arm | uwp)), !android: not supported by the MDL SDK
+# !x86, !(windows & (arm | uwp)), !android: not supported by the MDL SDK
 # !(osx & arm): no precompiled clang 12 binaries available
+
+# Required for plugins.
+set(VCPKG_POLICY_DLLS_IN_STATIC_LIBRARY enabled)
+
+# The libraries are supposed to be loaded at runtime, not linked.
+set(VCPKG_POLICY_DLLS_WITHOUT_LIBS enabled)
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO NVIDIA/MDL-SDK
-    REF "${VERSION}"
-    SHA512 56a8ae1912da50e95ecae2368615da9a5d74191ed8b84e343e5b06adda981969d0c9b2a2228a1f4669918b71e8a942f4757fc712cbe995be6e3aca863ad72a04
+    REF 2c125342d99fed865807474afdec49c8362152e5
+    SHA512 42543777bf99179e3c5055038c36471b5e2fa7b52a377dd9c097031e03ebc92d99e05d79a76a19c65ecd625ba1670af2ea8f67f270ad059a97ac9d7f992b795b
     HEAD_REF master
-    PATCHES
-        008-build-static-llvm.patch
-        012-remove-wrong-llvm-cxx-standard.patch
-        013-openimageio-3.0.patch
 )
 
 vcpkg_find_acquire_program(PYTHON3)
@@ -91,22 +90,36 @@ vcpkg_find_acquire_program(PYTHON3)
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS
     FEATURES
         dds           MDL_BUILD_DDS_PLUGIN
+        df-vulkan     MDL_BUILD_SDK_EXAMPLES
+        df-vulkan     MDL_ENABLE_VULKAN_EXAMPLES
         openimageio   MDL_BUILD_OPENIMAGEIO_PLUGIN
 )
+
+if(VCPKG_TARGET_IS_WINDOWS)
+    if(VCPKG_CRT_LINKAGE STREQUAL "static")
+        set(MSVC_RUNTIME_OPTION "-DMDL_MSVC_DYNAMIC_RUNTIME:BOOL=OFF")
+    else()
+        set(MSVC_RUNTIME_OPTION "-DMDL_MSVC_DYNAMIC_RUNTIME:BOOL=ON")
+    endif()
+endif()
 
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DMDL_LOG_DEPENDENCIES:BOOL=ON
         -DMDL_BUILD_SDK:BOOL=ON
-        -DMDL_BUILD_SDK_EXAMPLES:BOOL=OFF
         -DMDL_BUILD_CORE_EXAMPLES:BOOL=OFF
         -DMDL_BUILD_DOCUMENTATION:BOOL=OFF
         -DMDL_BUILD_ARNOLD_PLUGIN:BOOL=OFF
+        -DMDL_ENABLE_CUDA_EXAMPLES:BOOL=OFF
+        -DMDL_ENABLE_D3D12_EXAMPLES:BOOL=OFF
+        -DMDL_ENABLE_OPENGL_EXAMPLES:BOOL=OFF
+        -DMDL_ENABLE_QT_EXAMPLES:BOOL=OFF
         -DMDL_ENABLE_UNIT_TESTS:BOOL=OFF
         -DMDL_ENABLE_PYTHON_BINDINGS:BOOL=OFF
         -DMDL_TREAT_RUNTIME_DEPS_AS_BUILD_DEPS:BOOL=OFF
         ${FEATURE_OPTIONS}
+        ${MSVC_RUNTIME_OPTION}
         -Dpython_PATH:PATH=${PYTHON3}
         -Dclang_PATH:PATH=${LLVM_CLANG}
 )
@@ -120,18 +133,37 @@ vcpkg_copy_tools(
     AUTO_CLEAN
 )
 
+if (MDL_ENABLE_VULKAN_EXAMPLES)
+    # Install df_vulkan binary into tools/mdl-sdk
+    vcpkg_copy_tools(
+        TOOL_NAMES df_vulkan
+        SEARCH_DIR "${CURRENT_PACKAGES_DIR}/examples/mdl_sdk/df_vulkan"
+        AUTO_CLEAN
+    )
+    # Install df_vulkan shaders into share/mdl-sdk/examples/mdl_sdk/df_vulkan
+    file(COPY
+        "${CURRENT_PACKAGES_DIR}/examples/mdl_sdk/df_vulkan"
+        DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}/examples/mdl_sdk")
+    # Install general example resources into share/mdl-sdk/examples/mdl
+    file(COPY
+        "${CURRENT_PACKAGES_DIR}/examples/mdl"
+        DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}/examples")
+endif()
+
 vcpkg_cmake_config_fixup(PACKAGE_NAME "mdl")
 
 file(REMOVE_RECURSE
     "${CURRENT_PACKAGES_DIR}/debug/doc"
+    "${CURRENT_PACKAGES_DIR}/debug/examples"
     "${CURRENT_PACKAGES_DIR}/debug/include"
     "${CURRENT_PACKAGES_DIR}/doc"
+    "${CURRENT_PACKAGES_DIR}/examples"
 )
 
-# install usage file
+# Install usage file
 file(INSTALL "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
 
-# merge all license files into copyright
+# Merge all license files into copyright
 file(INSTALL "${SOURCE_PATH}/LICENSE.md" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}" RENAME copyright)
 file(READ "${SOURCE_PATH}/LICENSE_IMAGES.md" _images)
 file(APPEND "${CURRENT_PACKAGES_DIR}/share/${PORT}/copyright" "\n\n${_images}")
